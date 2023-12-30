@@ -1,36 +1,14 @@
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{alphanumeric1, multispace0, multispace1},
-    combinator::{map, opt, value},
+    character::complete::{alphanumeric1, multispace0, multispace1, newline},
+    combinator::{all_consuming, map, opt},
     multi::many0,
     sequence::tuple,
     IResult,
 };
 
-pub struct TExp {
-    name: String,
-    params: Vec<TExp>,
-}
-pub struct Bounds {
-    pos: Vec<TExp>,
-    neg: Vec<TExp>,
-}
-pub struct Param {
-    name: String,
-    bounds: Bounds,
-}
-pub struct Trait {
-    name: String,
-    params: Vec<Param>,
-    subtrait: Bounds,
-}
-pub struct Impl {
-    params: Vec<Param>,
-    trait_name: String,
-    args: Vec<TExp>,
-    impl_for: TExp,
-}
+use crate::common::*;
 
 pub fn id(s: &str) -> IResult<&str, String> {
     map(alphanumeric1, |name: &str| name.to_string())(s)
@@ -40,48 +18,43 @@ pub fn t_exp(s: &str) -> IResult<&str, TExp> {
     map(
         tuple((
             id,
-            multispace0,
-            tag("<"),
-            multispace0,
-            many0(map(
-                tuple((t_exp, multispace0, tag(","), multispace0)),
-                |(p_exp, _, _, _)| p_exp,
-            )),
-            multispace0,
-            t_exp,
-            multispace0,
-            tag(">"),
-        )),
-        |(name, _, _, _, init, _, last, _, _)| {
-            let mut params = init;
-            params.push(last);
-            TExp { name, params }
-        },
-    )(s)
-}
-pub fn trait_bounds(s: &str) -> IResult<&str, Bounds> {
-    map(
-        tuple((
-            t_exp,
-            many0(map(
-                tuple((multispace0, tag("+"), multispace0, t_exp)),
-                |(_, _, _, t_exp)| t_exp,
+            opt(map(
+                tuple((
+                    multispace0,
+                    tag("<"),
+                    multispace0,
+                    many0(map(
+                        tuple((t_exp, multispace0, tag(","), multispace0)),
+                        |(p_exp, _, _, _)| p_exp,
+                    )),
+                    multispace0,
+                    t_exp,
+                    multispace0,
+                    tag(">"),
+                )),
+                |(_, _, _, init, _, last, _, _)| {
+                    let mut params = init;
+                    params.push(last);
+                    params
+                },
             )),
         )),
-        |(head, tail)| {
-            let mut pos = vec![head];
-            pos.extend(tail);
-            Bounds {
-                pos,
-                neg: Vec::new(),
-            }
+        |(name, opt_params)| TExp {
+            name,
+            params: opt_params.unwrap_or(Vec::new()),
         },
     )(s)
 }
 pub fn param(s: &str) -> IResult<&str, Param> {
     map(
-        tuple((id, multispace0, tag(":"), multispace0, trait_bounds)),
-        |(name, _, _, _, bounds)| Param { name, bounds },
+        tuple((
+            id,
+            opt(map(
+                tuple((multispace0, tag(":"), multispace0, new_trait_bounds)),
+                |(_, _, _, b)| b,
+            )),
+        )),
+        |(name, bounds)| Param { name, bounds },
     )(s)
 }
 pub fn params(s: &str) -> IResult<&str, Vec<Param>> {
@@ -115,19 +88,19 @@ pub fn trait_def(s: &str) -> IResult<&str, Trait> {
             multispace1,
             id,
             multispace0,
-            params,
-            multispace0,
-            tag(":"),
-            multispace0,
-            trait_bounds,
+            opt(params),
+            opt(map(
+                tuple((multispace0, tag(":"), multispace0, new_trait_bounds)),
+                |(_, _, _, b)| b,
+            )),
             multispace0,
             tag("{"),
             multispace0,
             tag("}"),
         )),
-        |(_, _, name, _, params, _, _, _, subtrait, _, _, _, _)| Trait {
+        |(_, _, name, _, opt_params, subtrait, _, _, _, _)| Trait {
             name,
-            params,
+            params: opt_params.unwrap_or(Vec::new()),
             subtrait,
         },
     )(s)
@@ -162,7 +135,7 @@ pub fn impl_def(s: &str) -> IResult<&str, Impl> {
         tuple((
             tag("impl"),
             multispace0,
-            params,
+            opt(params),
             multispace0,
             id,
             multispace0,
@@ -176,20 +149,39 @@ pub fn impl_def(s: &str) -> IResult<&str, Impl> {
             multispace0,
             tag("}"),
         )),
-        |(_, _, params, _, trait_name, _, opt_args, _, _, _, impl_for, _, _, _, _)| {
-            let args = if let Some(args) = opt_args {
-                args
-            } else {
-                Vec::new()
-            };
-            Impl {
-                params,
-                trait_name,
-                args,
-                impl_for,
-            }
+        |(_, _, opt_params, _, trait_name, _, opt_args, _, _, _, impl_for, _, _, _, _)| Impl {
+            params: opt_params.unwrap_or(Vec::new()),
+            trait_name,
+            args: opt_args.unwrap_or(Vec::new()),
+            impl_for,
         },
     )(s)
+}
+
+pub fn struct_def(s: &str) -> IResult<&str, Struct> {
+    map(
+        tuple((tag("struct"), multispace1, id, multispace0, tag(";"))),
+        |(_, _, name, _, _)| Struct(name),
+    )(s)
+}
+
+pub fn program(s: &str) -> IResult<&str, Program> {
+    all_consuming(map(
+        many0(map(
+            tuple((
+                multispace0,
+                alt((
+                    map(struct_def, |d| Decl::Struct(d)),
+                    map(trait_def, |d| Decl::Trait(d)),
+                    map(impl_def, |d| Decl::Impl(d)),
+                )),
+                newline,
+                multispace0,
+            )),
+            |(_, d, _, _)| d,
+        )),
+        |ds| Program(ds),
+    ))(s)
 }
 
 // Extend
