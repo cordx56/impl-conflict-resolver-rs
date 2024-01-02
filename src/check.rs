@@ -1,3 +1,6 @@
+pub mod checker;
+pub mod parser;
+
 #[derive(Debug, Clone)]
 pub struct TExp {
     pub(crate) name: String,
@@ -24,9 +27,9 @@ pub struct Impl {
     pub(crate) params: Vec<Param>,
     pub(crate) trait_name: String,
     pub(crate) args: Vec<TExp>,
-    pub(crate) impl_for: TExp,
+    pub(crate) impl_for: Struct,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Struct(pub(crate) String);
 
 #[derive(Debug, Clone)]

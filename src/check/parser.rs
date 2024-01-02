@@ -1,3 +1,4 @@
+use super::*;
 use nom::{
     branch::alt,
     bytes::complete::tag,
@@ -7,8 +8,6 @@ use nom::{
     sequence::tuple,
     IResult,
 };
-
-use crate::common::*;
 
 pub fn id(s: &str) -> IResult<&str, String> {
     map(alphanumeric1, |name: &str| name.to_string())(s)
@@ -143,7 +142,7 @@ pub fn impl_def(s: &str) -> IResult<&str, Impl> {
             multispace1,
             tag("for"),
             multispace1,
-            t_exp,
+            id,
             multispace0,
             tag("{"),
             multispace0,
@@ -153,7 +152,7 @@ pub fn impl_def(s: &str) -> IResult<&str, Impl> {
             params: opt_params.unwrap_or(Vec::new()),
             trait_name,
             args: opt_args.unwrap_or(Vec::new()),
-            impl_for,
+            impl_for: Struct(impl_for),
         },
     )(s)
 }
