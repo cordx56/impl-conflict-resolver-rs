@@ -20,13 +20,12 @@ pub struct Param {
 pub struct Trait {
     pub(crate) name: String,
     pub(crate) params: Vec<Param>,
-    pub(crate) subtrait: Option<Bounds>,
+    pub(crate) subtraits: Option<Bounds>,
 }
 #[derive(Debug, Clone)]
 pub struct Impl {
     pub(crate) params: Vec<Param>,
-    pub(crate) trait_name: String,
-    pub(crate) args: Vec<TExp>,
+    pub(crate) trait_exp: TExp,
     pub(crate) impl_for: Struct,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

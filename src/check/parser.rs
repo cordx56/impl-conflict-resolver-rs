@@ -97,10 +97,10 @@ pub fn trait_def(s: &str) -> IResult<&str, Trait> {
             multispace0,
             tag("}"),
         )),
-        |(_, _, name, _, opt_params, subtrait, _, _, _, _)| Trait {
+        |(_, _, name, _, opt_params, subtraits, _, _, _, _)| Trait {
             name,
             params: opt_params.unwrap_or(Vec::new()),
-            subtrait,
+            subtraits,
         },
     )(s)
 }
@@ -150,8 +150,10 @@ pub fn impl_def(s: &str) -> IResult<&str, Impl> {
         )),
         |(_, _, opt_params, _, trait_name, _, opt_args, _, _, _, impl_for, _, _, _, _)| Impl {
             params: opt_params.unwrap_or(Vec::new()),
-            trait_name,
-            args: opt_args.unwrap_or(Vec::new()),
+            trait_exp: TExp {
+                name: trait_name,
+                params: opt_args.unwrap_or(Vec::new()),
+            },
             impl_for: Struct(impl_for),
         },
     )(s)
