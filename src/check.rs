@@ -1,6 +1,8 @@
 pub mod checker;
 pub mod parser;
 
+use std::fmt::Display;
+
 #[derive(Debug, Clone)]
 pub struct TExp {
     pub(crate) name: String,
@@ -40,3 +42,56 @@ pub enum Decl {
 
 #[derive(Debug, Clone)]
 pub struct Program(pub(crate) Vec<Decl>);
+
+impl Display for TExp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)?;
+        let mut iter = self.params.iter();
+        if let Some(first) = iter.next() {
+            write!(f, "<{}", first)?;
+            for t in iter {
+                write!(f, ", {}", t)?;
+            }
+            write!(f, ">")?;
+        }
+        Ok(())
+    }
+}
+impl Display for Bounds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut iter = self.pos.iter();
+        if let Some(first) = iter.next() {
+            write!(f, "{}", first)?;
+            for t in iter {
+                write!(f, " + {}", t)?;
+            }
+        }
+        for t in self.neg.iter() {
+            write!(f, " - {}", t)?;
+        }
+        Ok(())
+    }
+}
+impl Display for Param {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)?;
+        if let Some(b) = &self.bounds {
+            write!(f, ": {}", b)?;
+        }
+        Ok(())
+    }
+}
+impl Display for Impl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "impl")?;
+        let mut iter = self.params.iter();
+        if let Some(first) = iter.next() {
+            write!(f, "<{}", first)?;
+            for p in iter {
+                write!(f, ", {}", p)?;
+            }
+            write!(f, ">")?;
+        }
+        write!(f, " {} for {}", self.trait_exp, self.impl_for.0)
+    }
+}

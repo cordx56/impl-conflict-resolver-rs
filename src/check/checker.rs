@@ -53,7 +53,7 @@ impl Env {
         } else if checker.structs.contains(&te.name) {
             Ok(TypeExpr::Type(Struct(te.name.clone())))
         } else {
-            Err("Type not found".to_string())
+            Err(format!("Type {} not found", te))
         }
     }
     pub fn resolve_bounds(&self, checker: &Checker, b: &Bounds) -> Result<ConcreteBounds, String> {
@@ -137,14 +137,29 @@ impl Checker {
                 Ok(Vec::new())
             }
         } else {
-            Err("Trait not declared".to_string())
+            Err(format!("Trait {} not declared", ct.name))
         }
     }
     /// 論文中 D に相当
     pub fn d(&self, ct: &ConcreteTrait) -> Result<Vec<ConcreteTrait>, String> {
-        let res = self
+        let mut res = vec![ct.clone()];
+        let d: Vec<_> = self
             .sub(ct)?
             .iter()
+            .map(|t| self.d(t))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+        res.extend(d);
+        Ok(res)
+    }
+    pub fn d_s<'a>(
+        &self,
+        cts: impl IntoIterator<Item = &'a ConcreteTrait>,
+    ) -> Result<Vec<ConcreteTrait>, String> {
+        let res = cts
+            .into_iter()
             .map(|t| self.d(t))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
@@ -155,22 +170,22 @@ impl Checker {
 
     fn check_bounds(
         &self,
-        b1: &ConcreteBounds,
-        b2: &ConcreteBounds,
+        b: &ConcreteBounds,
+        c: &ConcreteBounds,
     ) -> Result<ConflictCheckResult, String> {
-        if b1.neg.len() == 0 && b2.neg.len() == 0 {
+        if b.neg.len() == 0 && c.neg.len() == 0 {
             return Ok(ConflictCheckResult::Conflict);
         }
-        for n in &b1.neg {
-            for p in &b2.pos {
-                if self.check_trait(n, p)? == ConflictCheckResult::Conflict {
+        for n in self.d_s(&b.neg)? {
+            for p in self.d_s(&c.pos)? {
+                if self.check_trait(&n, &p)? == ConflictCheckResult::Conflict {
                     return Ok(ConflictCheckResult::NotConflict);
                 }
             }
         }
-        for n in &b2.neg {
-            for p in &b1.pos {
-                if self.check_trait(n, p)? == ConflictCheckResult::Conflict {
+        for n in self.d_s(&c.neg)? {
+            for p in self.d_s(&b.pos)? {
+                if self.check_trait(&n, &p)? == ConflictCheckResult::Conflict {
                     return Ok(ConflictCheckResult::NotConflict);
                 }
             }
@@ -285,14 +300,16 @@ impl Checker {
         }
     }
 
-    pub fn check(&mut self, p: Program) -> Result<Vec<ConflictCheckResult>, String> {
+    pub fn check(&mut self, p: Program) -> Result<Vec<(ConflictCheckResult, Impl, Impl)>, String> {
         let mut res = Vec::new();
         self.insert(p);
         for (_, im) in self.impls.iter() {
             for i in 0..im.len() {
                 for j in i + 1..im.len() {
-                    let check_result = self.check_impls(&im[i], &im[j])?;
-                    res.push(check_result);
+                    let i = im[i].clone();
+                    let j = im[j].clone();
+                    let check_result = self.check_impls(&i, &j)?;
+                    res.push((check_result, i, j));
                 }
             }
         }
