@@ -139,7 +139,7 @@ pub fn impl_def(s: &str) -> IResult<&str, Impl> {
             id,
             multispace0,
             opt(args),
-            multispace1,
+            multispace0,
             tag("for"),
             multispace1,
             id,

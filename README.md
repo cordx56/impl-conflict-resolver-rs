@@ -5,5 +5,5 @@
 ## 実行例
 
 ```bash
-cargo run -- sample2.rs
+cargo run -- sample6.rs
 ```
