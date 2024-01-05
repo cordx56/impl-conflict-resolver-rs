@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConflictCheckResult {
     Conflict,
-    NotConflict,
+    NonConflict,
 }
 
 #[derive(Debug, Clone)]
@@ -179,14 +179,14 @@ impl Checker {
         for n in self.d_s(&b.neg)? {
             for p in self.d_s(&c.pos)? {
                 if self.check_trait(&n, &p)? == ConflictCheckResult::Conflict {
-                    return Ok(ConflictCheckResult::NotConflict);
+                    return Ok(ConflictCheckResult::NonConflict);
                 }
             }
         }
         for n in self.d_s(&c.neg)? {
             for p in self.d_s(&b.pos)? {
                 if self.check_trait(&n, &p)? == ConflictCheckResult::Conflict {
-                    return Ok(ConflictCheckResult::NotConflict);
+                    return Ok(ConflictCheckResult::NonConflict);
                 }
             }
         }
@@ -203,7 +203,7 @@ impl Checker {
                     if t1 == t2 {
                         Ok(ConflictCheckResult::Conflict)
                     } else {
-                        Ok(ConflictCheckResult::NotConflict)
+                        Ok(ConflictCheckResult::NonConflict)
                     }
                 }
                 TypeExpr::Param(p2) => {
@@ -223,7 +223,7 @@ impl Checker {
                                 }
                             }
                         }
-                        Ok(ConflictCheckResult::NotConflict)
+                        Ok(ConflictCheckResult::NonConflict)
                     } else {
                         Ok(ConflictCheckResult::Conflict)
                     }
@@ -248,7 +248,7 @@ impl Checker {
         t2: &ConcreteTrait,
     ) -> Result<ConflictCheckResult, String> {
         if t1.name != t2.name {
-            Ok(ConflictCheckResult::NotConflict)
+            Ok(ConflictCheckResult::NonConflict)
         } else {
             let uv = t1
                 .params
@@ -256,8 +256,8 @@ impl Checker {
                 .zip(t2.params.iter())
                 .map(|(u, v)| self.check_type_expr(u, v))
                 .collect::<Result<Vec<_>, _>>()?;
-            if uv.contains(&ConflictCheckResult::NotConflict) {
-                Ok(ConflictCheckResult::NotConflict)
+            if uv.contains(&ConflictCheckResult::NonConflict) {
+                Ok(ConflictCheckResult::NonConflict)
             } else {
                 Ok(ConflictCheckResult::Conflict)
             }
@@ -277,7 +277,7 @@ impl Checker {
         let (i1_t, i1_s) = self.analyze_impl(i1)?;
         let (i2_t, i2_s) = self.analyze_impl(i2)?;
         if i1_s != i2_s {
-            Ok(ConflictCheckResult::NotConflict)
+            Ok(ConflictCheckResult::NonConflict)
         } else {
             if i1_t.name == i2_t.name {
                 if i1_t.params.len() == 0 {
@@ -289,13 +289,13 @@ impl Checker {
                     .zip(i2_t.params.iter())
                     .map(|(u, v)| self.check_type_expr(u, v))
                     .collect::<Result<Vec<_>, _>>()?;
-                if results.contains(&ConflictCheckResult::NotConflict) {
-                    Ok(ConflictCheckResult::NotConflict)
+                if results.contains(&ConflictCheckResult::NonConflict) {
+                    Ok(ConflictCheckResult::NonConflict)
                 } else {
                     Ok(ConflictCheckResult::Conflict)
                 }
             } else {
-                Ok(ConflictCheckResult::NotConflict)
+                Ok(ConflictCheckResult::NonConflict)
             }
         }
     }
