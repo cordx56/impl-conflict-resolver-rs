@@ -2,7 +2,7 @@
 
 研究用Rustサブセット
 
-## 実行
+## 実行例
 
 ```bash
 cargo run -- sample2.rs
