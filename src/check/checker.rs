@@ -1,5 +1,7 @@
 use super::*;
+use anyhow::{anyhow, Context as _, Result};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConflictCheckResult {
@@ -8,159 +10,363 @@ pub enum ConflictCheckResult {
 }
 
 #[derive(Debug, Clone)]
-pub enum TypeExpr {
-    Type(Struct),
-    Param(Option<ConcreteBounds>),
+pub enum ConcreteType {
+    Type {
+        name: String,
+        params: Vec<ConcreteType>,
+    },
+    Param {
+        id: usize,
+        name: String,
+        //bound: Option<ConcreteBound>,
+    },
+}
+impl PartialEq for ConcreteType {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Self::Type {
+                name: n1,
+                params: ps1,
+            } => match other {
+                Self::Type {
+                    name: n2,
+                    params: ps2,
+                } => {
+                    if n1 != n2 {
+                        return false;
+                    }
+                    for (p1, p2) in ps1.iter().zip(ps2.iter()) {
+                        if p1 != p2 {
+                            return false;
+                        }
+                    }
+                    true
+                }
+                Self::Param { .. } => false,
+            },
+            Self::Param { id: id1, .. } => match other {
+                Self::Type { .. } => false,
+                Self::Param { id: id2, .. } => id1 == id2,
+            },
+        }
+    }
+}
+impl Display for ConcreteType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConcreteType::Type { name, params } => {
+                write!(f, "{}", name)?;
+                let mut iter = params.iter();
+                if let Some(i) = iter.next() {
+                    write!(f, "<{}", i)?;
+                    for i in iter {
+                        write!(f, ", {}", i)?;
+                    }
+                    write!(f, ">")?;
+                }
+                Ok(())
+            }
+            ConcreteType::Param { name, .. } => {
+                write!(f, "{}", name)
+            }
+        }
+    }
 }
 #[derive(Debug, Clone)]
 pub struct ConcreteTrait {
-    pub(crate) name: String,
-    pub(crate) params: Vec<TypeExpr>,
+    name: String,
+    params: Vec<ConcreteType>,
 }
-#[derive(Debug, Clone)]
-pub struct ConcreteBounds {
-    pub(crate) pos: Vec<ConcreteTrait>,
-    pub(crate) neg: Vec<ConcreteTrait>,
-}
-#[derive(Debug, Clone)]
-struct Env {
-    bounds: HashMap<String, Option<ConcreteBounds>>,
-}
-impl Env {
-    pub fn new() -> Self {
-        Self {
-            bounds: HashMap::new(),
-        }
-    }
-    pub fn insert<'a>(
-        &mut self,
-        checker: &Checker,
-        params: impl IntoIterator<Item = &'a Param>,
-    ) -> Result<(), String> {
-        for p in params.into_iter() {
-            let opt_cb = if let Some(b) = &p.bounds {
-                Some(self.resolve_bounds(checker, b)?)
-            } else {
-                None
-            };
-            self.bounds.insert(p.name.clone(), opt_cb);
+impl Display for ConcreteTrait {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)?;
+        let mut iter = self.params.iter();
+        if let Some(i) = iter.next() {
+            write!(f, "<{}", i)?;
+            for i in iter {
+                write!(f, ", {}", i)?;
+            }
+            write!(f, ">")?;
         }
         Ok(())
     }
-    pub fn resolve_type(&self, checker: &Checker, te: &TExp) -> Result<TypeExpr, String> {
-        if let Some(b) = self.bounds.get(&te.name) {
-            Ok(TypeExpr::Param(b.clone()))
-        } else if checker.structs.contains(&te.name) {
-            Ok(TypeExpr::Type(Struct(te.name.clone())))
-        } else {
-            Err(format!("Type {} not found", te))
+}
+#[derive(Debug, Clone)]
+pub struct ConcreteBound {
+    pos: Vec<ConcreteTrait>,
+    neg: Vec<ConcreteTrait>,
+}
+impl ConcreteBound {
+    pub fn join(b1: &ConcreteBound, b2: &ConcreteBound) -> ConcreteBound {
+        let b1_pos = b1.pos.clone();
+        let b2_pos = b2.pos.clone();
+        let pos = [b1_pos, b2_pos].concat();
+        let b1_neg = b1.neg.clone();
+        let b2_neg = b2.neg.clone();
+        let neg = [b1_neg, b2_neg].concat();
+        let bound = ConcreteBound { pos, neg };
+        bound
+    }
+}
+impl Display for ConcreteBound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut pos = self.pos.iter();
+        if let Some(p) = pos.next() {
+            write!(f, "{}", p)?;
+            for p in pos {
+                write!(f, " + {}", p)?;
+            }
         }
-    }
-    pub fn resolve_bounds(&self, checker: &Checker, b: &Bounds) -> Result<ConcreteBounds, String> {
-        let pos = b
-            .pos
-            .iter()
-            .map(|p| self.resolve_trait(checker, p))
-            .collect::<Result<Vec<_>, _>>()?;
-        let neg = b
-            .neg
-            .iter()
-            .map(|p| self.resolve_trait(checker, p))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(ConcreteBounds { pos, neg })
-    }
-    pub fn resolve_trait(&self, checker: &Checker, te: &TExp) -> Result<ConcreteTrait, String> {
-        let params = te
-            .params
-            .iter()
-            .map(|p| self.resolve_type(checker, p))
-            .collect::<Result<Vec<_>, _>>()?;
-        let name = te.name.clone();
-        Ok(ConcreteTrait { name, params })
+        for n in self.neg.iter() {
+            write!(f, " - {}", n)?;
+        }
+        Ok(())
     }
 }
 
-/// 検査を行うやつ
-pub struct Checker {
-    structs: HashSet<String>,
-    traits: HashMap<String, Trait>,
-    impls: HashMap<String, Vec<Impl>>,
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnificationResult {
+    Ok,
+    Failure,
 }
-
-impl Checker {
+#[derive(Debug, Clone)]
+struct Unifier(HashMap<usize, ConcreteType>);
+impl Unifier {
     pub fn new() -> Self {
-        Self {
-            structs: HashSet::new(),
-            traits: HashMap::new(),
-            impls: HashMap::new(),
-        }
+        Self(HashMap::new())
     }
-    fn insert(&mut self, Program(p): Program) {
-        for d in p {
-            match d {
-                Decl::Struct(s) => {
-                    self.structs.insert(s.0);
+    pub fn resolve(&mut self, cty: &ConcreteType) -> ConcreteType {
+        match cty {
+            ConcreteType::Type { name, params } => {
+                let params = params.iter().map(|p| self.resolve(p)).collect();
+                ConcreteType::Type {
+                    name: name.clone(),
+                    params,
                 }
-                Decl::Trait(t) => {
-                    self.traits.insert(t.name.clone(), t);
-                }
-                Decl::Impl(i) => {
-                    if let Some(v) = self.impls.get_mut(&i.impl_for.0) {
-                        v.push(i);
-                    } else {
-                        self.impls.insert(i.impl_for.0.clone(), vec![i]);
-                    }
+            }
+            ConcreteType::Param { id, .. } => {
+                let sct = self.0.get(id).cloned();
+                if let Some(ct) = sct {
+                    let new_ct = self.resolve(&ct);
+                    // あとでトレイト境界を集める時に経路を辿れるようにする
+                    //self.0.insert(*id, new_ct.clone());
+                    new_ct
+                } else {
+                    cty.clone()
                 }
             }
         }
     }
-    /// 論文中 SubB に相当
-    fn sub_b(&self, env: &Env, b: &Bounds) -> Result<Vec<ConcreteTrait>, String> {
-        let res = b
-            .pos
-            .iter()
-            .map(|t| env.resolve_trait(self, t))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(res)
+
+    pub fn type_unify(&mut self, cty1: &ConcreteType, cty2: &ConcreteType) -> UnificationResult {
+        let cty1 = self.resolve(cty1);
+        let cty2 = self.resolve(cty2);
+        match &cty1 {
+            ConcreteType::Type {
+                name: n1,
+                params: ps1,
+            } => match &cty2 {
+                ConcreteType::Type {
+                    name: n2,
+                    params: ps2,
+                } => {
+                    if n1 != n2 {
+                        return UnificationResult::Failure;
+                    }
+                    for (p1, p2) in ps1.iter().zip(ps2.iter()) {
+                        if self.type_unify(p1, p2) == UnificationResult::Failure {
+                            return UnificationResult::Failure;
+                        }
+                    }
+                    UnificationResult::Ok
+                }
+                ConcreteType::Param { id, .. } => {
+                    self.0.insert(*id, cty1.clone());
+                    UnificationResult::Ok
+                }
+            },
+            ConcreteType::Param { id: id1, .. } => match cty2 {
+                ConcreteType::Type { .. } => self.type_unify(&cty2, &cty1),
+                ConcreteType::Param { .. } => {
+                    self.0.insert(*id1, cty2.clone());
+                    UnificationResult::Ok
+                }
+            },
+        }
     }
-    /// 論文中 Sub に相当
-    pub fn sub(&self, ct: &ConcreteTrait) -> Result<Vec<ConcreteTrait>, String> {
+    pub fn trait_unify(&mut self, ctr1: &ConcreteTrait, ctr2: &ConcreteTrait) -> UnificationResult {
+        if ctr1.name != ctr2.name {
+            UnificationResult::Failure
+        } else {
+            for (p1, p2) in ctr1.params.iter().zip(ctr2.params.iter()) {
+                if self.type_unify(p1, p2) == UnificationResult::Failure {
+                    return UnificationResult::Failure;
+                }
+            }
+            UnificationResult::Ok
+        }
+    }
+
+    fn get_routes(&self, routes: &mut Vec<(Option<ConcreteType>, HashSet<usize>)>, i: usize) {
+        let mut route = None;
+        for r in routes.iter_mut() {
+            if r.1.contains(&i) {
+                route = Some(r)
+            }
+        }
+        if route.is_none() {
+            let last = routes.len();
+            routes.push((None, HashSet::from([i])));
+            route = routes.get_mut(last);
+        }
+        let route = route.unwrap();
+        if let Some(ct) = self.0.get(&i) {
+            match ct {
+                ConcreteType::Param { id, .. } => {
+                    route.1.insert(*id);
+                    self.get_routes(routes, *id);
+                }
+                ConcreteType::Type { .. } => {
+                    route.0 = Some(ct.clone());
+                }
+            }
+        } else {
+            route.1.insert(i);
+        }
+    }
+    pub fn get_all_unified_params(&self) -> Vec<(Option<ConcreteType>, HashSet<usize>)> {
+        let mut routes = Vec::new();
+        for i in self.0.keys() {
+            self.get_routes(&mut routes, *i);
+        }
+        routes
+    }
+}
+
+struct ConcreteImpl {
+    trait_exp: ConcreteTrait,
+    impl_for: ConcreteType,
+}
+struct ConflictCheckEnv<'a> {
+    checker: &'a Checker,
+    params: Vec<Option<ConcreteBound>>,
+}
+impl<'a> ConflictCheckEnv<'a> {
+    pub fn new(checker: &'a Checker) -> Self {
+        Self {
+            checker,
+            params: Vec::new(),
+        }
+    }
+    fn texp_to_concrete_type(
+        &self,
+        env: &HashMap<String, usize>,
+        te: &TExp,
+    ) -> Result<ConcreteType> {
+        if let Some(id) = env.get(&te.name) {
+            Ok(ConcreteType::Param {
+                id: *id,
+                name: te.name.clone(),
+            })
+        } else {
+            if let Some(st) = self.checker.structs.get(&te.name) {
+                let te_param_len = te.params.len();
+                if st.params.as_ref().map(|ps| ps.len()).unwrap_or(0) != te_param_len {
+                    Err(anyhow!("Param length error between {} and {}", st, te))
+                } else {
+                    let params = te
+                        .params
+                        .iter()
+                        .map(|p| self.texp_to_concrete_type(env, p))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(ConcreteType::Type {
+                        name: te.name.clone(),
+                        params,
+                    })
+                }
+            } else {
+                Err(anyhow!("Undefined struct"))
+            }
+        }
+    }
+    fn texp_to_concrete_trait(
+        &self,
+        env: &HashMap<String, usize>,
+        te: &TExp,
+    ) -> Result<ConcreteTrait> {
+        let params = te
+            .params
+            .iter()
+            .map(|t| self.texp_to_concrete_type(env, t))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ConcreteTrait {
+            name: te.name.clone(),
+            params,
+        })
+    }
+
+    /// 論文中 Sup に相当
+    pub fn sup(&self, ct: &ConcreteTrait) -> Result<Vec<ConcreteTrait>> {
         if let Some(Trait {
-            params, subtraits, ..
-        }) = self.traits.get(&ct.name)
+            params,
+            supertraits,
+            ..
+        }) = self.checker.traits.get(&ct.name)
         {
-            let mut env = Env::new();
-            env.insert(self, params)?;
-            if let Some(bs) = subtraits {
-                self.sub_b(&env, bs)
+            let mut env = HashMap::new();
+            for (n, t) in params.iter().map(|p| &p.name).zip(ct.params.iter()) {
+                env.insert(n.clone(), t.clone());
+            }
+            if let Some(supertraits) = supertraits {
+                let supertraits = supertraits
+                    .pos
+                    .iter()
+                    .map(|t| {
+                        let params = t
+                            .params
+                            .iter()
+                            .map(|p| {
+                                if let Some(ct) = env.get(&p.name) {
+                                    Ok(ct.clone())
+                                } else {
+                                    self.texp_to_concrete_type(&HashMap::new(), p)
+                                }
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        anyhow::Ok(ConcreteTrait {
+                            name: t.name.clone(),
+                            params,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(supertraits)
             } else {
                 Ok(Vec::new())
             }
         } else {
-            Err(format!("Trait {} not declared", ct.name))
+            Err(anyhow!("Trait {} not declared", ct.name))
         }
     }
-    /// 論文中 D に相当
-    pub fn d(&self, ct: &ConcreteTrait) -> Result<Vec<ConcreteTrait>, String> {
+    /// 論文中 A' に相当
+    pub fn a_d(&self, ct: &ConcreteTrait) -> Result<Vec<ConcreteTrait>> {
         let mut res = vec![ct.clone()];
-        let d: Vec<_> = self
-            .sub(ct)?
+        let sups = self
+            .sup(ct)?
             .iter()
-            .map(|t| self.d(t))
+            .map(|t| self.sup(t))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .flatten()
-            .collect();
-        res.extend(d);
+            .collect::<Vec<_>>();
+        res.extend(sups);
         Ok(res)
     }
-    pub fn d_s<'a>(
-        &self,
-        cts: impl IntoIterator<Item = &'a ConcreteTrait>,
-    ) -> Result<Vec<ConcreteTrait>, String> {
-        let res = cts
-            .into_iter()
-            .map(|t| self.d(t))
+    /// 論文中 A に相当
+    pub fn a(&self, b: &ConcreteBound) -> Result<Vec<ConcreteTrait>> {
+        let res = b
+            .pos
+            .iter()
+            .map(|t| self.a_d(t))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .flatten()
@@ -168,149 +374,155 @@ impl Checker {
         Ok(res)
     }
 
-    fn check_bounds(
-        &self,
-        b: &ConcreteBounds,
-        c: &ConcreteBounds,
-    ) -> Result<ConflictCheckResult, String> {
-        if b.neg.len() == 0 && c.neg.len() == 0 {
-            return Ok(ConflictCheckResult::Conflict);
-        }
-        for n in self.d_s(&b.neg)? {
-            for p in self.d_s(&c.pos)? {
-                if self.check_trait(&n, &p)? == ConflictCheckResult::Conflict {
-                    return Ok(ConflictCheckResult::NonConflict);
-                }
-            }
-        }
-        for n in self.d_s(&c.neg)? {
-            for p in self.d_s(&b.pos)? {
-                if self.check_trait(&n, &p)? == ConflictCheckResult::Conflict {
+    /// Check trait bounds
+    fn check_bound(&self, b: &ConcreteBound) -> Result<ConflictCheckResult> {
+        let a = self.a(b).with_context(|| format!("A({}) error", b))?;
+        for n in b.neg.iter() {
+            'outer: for a in a.iter() {
+                if a.name == n.name {
+                    for (p1, p2) in a.params.iter().zip(n.params.iter()) {
+                        if p1 != p2 {
+                            continue 'outer;
+                        }
+                    }
                     return Ok(ConflictCheckResult::NonConflict);
                 }
             }
         }
         Ok(ConflictCheckResult::Conflict)
     }
-    pub fn check_type_expr(
-        &self,
-        te1: &TypeExpr,
-        te2: &TypeExpr,
-    ) -> Result<ConflictCheckResult, String> {
-        match te1 {
-            TypeExpr::Type(t1) => match te2 {
-                TypeExpr::Type(t2) => {
-                    if t1 == t2 {
-                        Ok(ConflictCheckResult::Conflict)
-                    } else {
-                        Ok(ConflictCheckResult::NonConflict)
-                    }
-                }
-                TypeExpr::Param(p2) => {
-                    if let Some(cb) = p2 {
-                        if let Some(is) = self.impls.get(&t1.0) {
-                            for i in is {
-                                let mut env = Env::new();
-                                env.insert(self, &i.params)?;
-                                let t = env.resolve_trait(self, &i.trait_exp)?;
-                                let pos = self.d(&t)?;
-                                let new_b = ConcreteBounds {
-                                    pos,
-                                    neg: Vec::new(),
-                                };
-                                if self.check_bounds(cb, &new_b)? == ConflictCheckResult::Conflict {
-                                    return Ok(ConflictCheckResult::Conflict);
-                                }
-                            }
-                        }
-                        Ok(ConflictCheckResult::NonConflict)
-                    } else {
-                        Ok(ConflictCheckResult::Conflict)
-                    }
-                }
-            },
-            TypeExpr::Param(p1) => match te2 {
-                TypeExpr::Type(_) => self.check_type_expr(te2, te1),
-                TypeExpr::Param(p2) => {
-                    if let Some(b1) = p1 {
-                        if let Some(b2) = p2 {
-                            return Ok(self.check_bounds(b1, b2)?);
-                        }
-                    }
-                    Ok(ConflictCheckResult::Conflict)
-                }
-            },
-        }
-    }
-    pub fn check_trait(
-        &self,
-        t1: &ConcreteTrait,
-        t2: &ConcreteTrait,
-    ) -> Result<ConflictCheckResult, String> {
-        if t1.name != t2.name {
-            Ok(ConflictCheckResult::NonConflict)
-        } else {
-            let uv = t1
-                .params
-                .iter()
-                .zip(t2.params.iter())
-                .map(|(u, v)| self.check_type_expr(u, v))
-                .collect::<Result<Vec<_>, _>>()?;
-            if uv.contains(&ConflictCheckResult::NonConflict) {
-                Ok(ConflictCheckResult::NonConflict)
-            } else {
-                Ok(ConflictCheckResult::Conflict)
-            }
-        }
-    }
 
-    pub fn analyze_impl(&self, i: &Impl) -> Result<(ConcreteTrait, Struct), String> {
-        if let Some(_) = self.traits.get(&i.trait_exp.name) {
-            let mut env = Env::new();
-            env.insert(self, &i.params)?;
-            Ok((env.resolve_trait(self, &i.trait_exp)?, i.impl_for.clone()))
-        } else {
-            Err("Trait not declared".to_string())
-        }
-    }
-    fn check_impls(&self, i1: &Impl, i2: &Impl) -> Result<ConflictCheckResult, String> {
-        let (i1_t, i1_s) = self.analyze_impl(i1)?;
-        let (i2_t, i2_s) = self.analyze_impl(i2)?;
-        if i1_s != i2_s {
-            Ok(ConflictCheckResult::NonConflict)
-        } else {
-            if i1_t.name == i2_t.name {
-                if i1_t.params.len() == 0 {
-                    return Ok(ConflictCheckResult::Conflict);
-                }
-                let results = i1_t
-                    .params
+    pub fn get_concrete_impl(&mut self, im: &Impl) -> Result<ConcreteImpl> {
+        let mut env = HashMap::new();
+        for p in &im.params {
+            let param_id = self.params.len();
+            if let Some(bound) = &p.bound {
+                let pos = bound
+                    .pos
                     .iter()
-                    .zip(i2_t.params.iter())
-                    .map(|(u, v)| self.check_type_expr(u, v))
+                    .map(|t| self.texp_to_concrete_trait(&env, t))
                     .collect::<Result<Vec<_>, _>>()?;
-                if results.contains(&ConflictCheckResult::NonConflict) {
-                    Ok(ConflictCheckResult::NonConflict)
-                } else {
-                    Ok(ConflictCheckResult::Conflict)
-                }
+                let neg = bound
+                    .neg
+                    .iter()
+                    .map(|t| self.texp_to_concrete_trait(&env, t))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let b = ConcreteBound { pos, neg };
+                self.params.push(Some(b));
             } else {
-                Ok(ConflictCheckResult::NonConflict)
+                self.params.push(None);
             }
+            env.insert(p.name.clone(), param_id);
+        }
+        let trait_params = im
+            .trait_exp
+            .params
+            .iter()
+            .map(|p| self.texp_to_concrete_type(&env, p))
+            .collect::<Result<Vec<_>, _>>()?;
+        let trait_exp = ConcreteTrait {
+            name: im.trait_exp.name.clone(),
+            params: trait_params,
+        };
+        let impl_for = self.texp_to_concrete_type(&env, &im.impl_for)?;
+        let cimpl = ConcreteImpl {
+            trait_exp,
+            impl_for,
+        };
+        Ok(cimpl)
+    }
+
+    fn check_impls<'b>(checker: &'a Checker, i1: &Impl, i2: &Impl) -> Result<ConflictCheckResult> {
+        let mut env = Self::new(checker);
+        let c1 = env.get_concrete_impl(i1)?;
+        let c2 = env.get_concrete_impl(i2)?;
+        let mut unif = Unifier::new();
+        if unif.trait_unify(&c1.trait_exp, &c2.trait_exp) == UnificationResult::Ok {
+            if unif.type_unify(&c1.impl_for, &c2.impl_for) == UnificationResult::Ok {
+                let params = unif.get_all_unified_params();
+                for (ct, ps) in params {
+                    let mut bound = ConcreteBound {
+                        pos: Vec::new(),
+                        neg: Vec::new(),
+                    };
+                    for p in ps.iter() {
+                        let b = &env.params[*p];
+                        if let Some(b) = b {
+                            bound = ConcreteBound::join(&bound, b);
+                        } else {
+                            return Ok(ConflictCheckResult::Conflict);
+                        }
+                    }
+                    if let Some(_) = ct {
+                        // 将来課題：現状では型変数と型式が単一化された段階で衝突
+                        // orphan rule などを考慮しながら、どうするか考える
+                        return Ok(ConflictCheckResult::Conflict);
+                    } else {
+                        if env
+                            .check_bound(&bound)
+                            .with_context(|| format!("Bound {} check error", bound))?
+                            == ConflictCheckResult::Conflict
+                        {
+                            return Ok(ConflictCheckResult::Conflict);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(ConflictCheckResult::NonConflict)
+    }
+}
+
+/// 検査を行うやつ
+pub struct Checker {
+    structs: HashMap<String, Struct>,
+    traits: HashMap<String, Trait>,
+    impls: Vec<Impl>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            structs: HashMap::new(),
+            traits: HashMap::new(),
+            impls: Vec::new(),
         }
     }
 
-    pub fn check(&mut self, p: Program) -> Result<Vec<(ConflictCheckResult, Impl, Impl)>, String> {
-        let mut res = Vec::new();
-        self.insert(p);
-        for (_, im) in self.impls.iter() {
-            for i in 0..im.len() {
-                for j in i + 1..im.len() {
-                    let i = im[i].clone();
-                    let j = im[j].clone();
-                    let check_result = self.check_impls(&i, &j)?;
-                    res.push((check_result, i, j));
+    pub fn insert(&mut self, Program(p): Program) -> Result<()> {
+        for d in p {
+            match d {
+                Decl::Struct(s) => {
+                    self.structs.insert(s.name.clone(), s);
                 }
+                Decl::Trait(t) => {
+                    self.traits.insert(t.name.clone(), t);
+                }
+                Decl::Impl(i) => {
+                    self.impls.push(i);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn check_impls(&self, i1: &Impl, i2: &Impl) -> Result<ConflictCheckResult> {
+        ConflictCheckEnv::check_impls(self, i1, i2)
+    }
+
+    pub fn check(&mut self, p: Program) -> Result<Vec<(ConflictCheckResult, Impl, Impl)>> {
+        let mut res = Vec::new();
+        self.insert(p)?;
+        for i in 0..self.impls.len() {
+            for j in (i + 1)..self.impls.len() {
+                let i1 = self.impls[i].clone();
+                let i2 = self.impls[j].clone();
+                res.push((
+                    self.check_impls(&i1, &i2)
+                        .with_context(|| format!("implementation {}, {} check error", i1, i2))?,
+                    i1,
+                    i2,
+                ));
             }
         }
         Ok(res)

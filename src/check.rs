@@ -5,33 +5,36 @@ use std::fmt::Display;
 
 #[derive(Debug, Clone)]
 pub struct TExp {
-    pub(crate) name: String,
-    pub(crate) params: Vec<TExp>,
+    name: String,
+    params: Vec<TExp>,
 }
 #[derive(Debug, Clone)]
-pub struct Bounds {
-    pub(crate) pos: Vec<TExp>,
-    pub(crate) neg: Vec<TExp>,
+pub struct Bound {
+    pos: Vec<TExp>,
+    neg: Vec<TExp>,
 }
 #[derive(Debug, Clone)]
 pub struct Param {
-    pub(crate) name: String,
-    pub(crate) bounds: Option<Bounds>,
+    name: String,
+    bound: Option<Bound>,
 }
 #[derive(Debug, Clone)]
 pub struct Trait {
-    pub(crate) name: String,
-    pub(crate) params: Vec<Param>,
-    pub(crate) subtraits: Option<Bounds>,
+    name: String,
+    params: Vec<Param>,
+    supertraits: Option<Bound>,
 }
 #[derive(Debug, Clone)]
 pub struct Impl {
-    pub(crate) params: Vec<Param>,
-    pub(crate) trait_exp: TExp,
-    pub(crate) impl_for: Struct,
+    params: Vec<Param>,
+    trait_exp: TExp,
+    impl_for: TExp,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Struct(pub(crate) String);
+#[derive(Debug, Clone)]
+pub struct Struct {
+    name: String,
+    params: Option<Vec<Param>>,
+}
 
 #[derive(Debug, Clone)]
 pub enum Decl {
@@ -57,7 +60,7 @@ impl Display for TExp {
         Ok(())
     }
 }
-impl Display for Bounds {
+impl Display for Bound {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut iter = self.pos.iter();
         if let Some(first) = iter.next() {
@@ -75,7 +78,7 @@ impl Display for Bounds {
 impl Display for Param {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name)?;
-        if let Some(b) = &self.bounds {
+        if let Some(b) = &self.bound {
             write!(f, ": {}", b)?;
         }
         Ok(())
@@ -92,6 +95,22 @@ impl Display for Impl {
             }
             write!(f, ">")?;
         }
-        write!(f, " {} for {}", self.trait_exp, self.impl_for.0)
+        write!(f, " {} for {}", self.trait_exp, self.impl_for)
+    }
+}
+impl Display for Struct {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)?;
+        if let Some(ps) = &self.params {
+            let mut iter = ps.iter();
+            if let Some(i) = iter.next() {
+                write!(f, "<{}", i)?;
+                for i in iter {
+                    write!(f, ", {}", i)?;
+                }
+                write!(f, ">")?;
+            }
+        }
+        Ok(())
     }
 }
