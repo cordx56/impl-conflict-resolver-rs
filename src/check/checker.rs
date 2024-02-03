@@ -461,12 +461,13 @@ impl<'a> ConflictCheckEnv<'a> {
                         if env
                             .check_bound(&bound)
                             .with_context(|| format!("Bound {} check error", bound))?
-                            == ConflictCheckResult::Conflict
+                            == ConflictCheckResult::NonConflict
                         {
-                            return Ok(ConflictCheckResult::Conflict);
+                            return Ok(ConflictCheckResult::NonConflict);
                         }
                     }
                 }
+                return Ok(ConflictCheckResult::Conflict);
             }
         }
         Ok(ConflictCheckResult::NonConflict)
