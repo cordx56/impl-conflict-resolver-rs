@@ -18,7 +18,6 @@ pub enum ConcreteType {
     Param {
         id: usize,
         name: String,
-        //bound: Option<ConcreteBound>,
     },
 }
 impl PartialEq for ConcreteType {
