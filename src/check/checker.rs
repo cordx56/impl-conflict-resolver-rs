@@ -284,7 +284,7 @@ impl<'a> ConflictCheckEnv<'a> {
                     })
                 }
             } else {
-                Err(anyhow!("Undefined struct"))
+                Err(anyhow!("Undefined struct {}", te.name))
             }
         }
     }
