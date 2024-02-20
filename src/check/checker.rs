@@ -9,7 +9,7 @@ pub enum ConflictCheckResult {
     NonConflict,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, Hash)]
 pub enum ConcreteType {
     Type {
         name: String,
@@ -71,7 +71,7 @@ impl Display for ConcreteType {
         }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConcreteTrait {
     name: String,
     params: Vec<ConcreteType>,
@@ -92,17 +92,17 @@ impl Display for ConcreteTrait {
 }
 #[derive(Debug, Clone)]
 pub struct ConcreteBound {
-    pos: Vec<ConcreteTrait>,
-    neg: Vec<ConcreteTrait>,
+    pos: HashSet<ConcreteTrait>,
+    neg: HashSet<ConcreteTrait>,
 }
 impl ConcreteBound {
-    pub fn join(b1: &ConcreteBound, b2: &ConcreteBound) -> ConcreteBound {
-        let b1_pos = b1.pos.clone();
-        let b2_pos = b2.pos.clone();
-        let pos = [b1_pos, b2_pos].concat();
-        let b1_neg = b1.neg.clone();
-        let b2_neg = b2.neg.clone();
-        let neg = [b1_neg, b2_neg].concat();
+    pub fn join(b: &ConcreteBound, c: &ConcreteBound) -> ConcreteBound {
+        let b_pos = &b.pos;
+        let c_pos = &c.pos;
+        let pos: HashSet<_> = b_pos.union(&c_pos).cloned().collect();
+        let b_neg = &b.neg;
+        let c_neg = &c.neg;
+        let neg: HashSet<_> = b_neg.union(&c_neg).cloned().collect();
         let bound = ConcreteBound { pos, neg };
         bound
     }
@@ -347,21 +347,21 @@ impl<'a> ConflictCheckEnv<'a> {
         }
     }
     /// 論文中 A' に相当
-    pub fn a_d(&self, ct: &ConcreteTrait) -> Result<Vec<ConcreteTrait>> {
-        let mut res = vec![ct.clone()];
+    pub fn a_d(&self, ct: &ConcreteTrait) -> Result<HashSet<ConcreteTrait>> {
+        let mut res = HashSet::from([ct.clone()]);
         let sups = self
             .sup(ct)?
             .iter()
             .map(|t| self.sup(t))
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<Result<HashSet<_>, _>>()?
             .into_iter()
             .flatten()
-            .collect::<Vec<_>>();
+            .collect::<HashSet<_>>();
         res.extend(sups);
         Ok(res)
     }
     /// 論文中 A に相当
-    pub fn a(&self, b: &ConcreteBound) -> Result<Vec<ConcreteTrait>> {
+    pub fn a(&self, b: &ConcreteBound) -> Result<HashSet<ConcreteTrait>> {
         let res = b
             .pos
             .iter()
@@ -376,19 +376,11 @@ impl<'a> ConflictCheckEnv<'a> {
     /// Check trait bounds
     fn check_bound(&self, b: &ConcreteBound) -> Result<ConflictCheckResult> {
         let a = self.a(b).with_context(|| format!("A({}) error", b))?;
-        for n in b.neg.iter() {
-            'outer: for a in a.iter() {
-                if a.name == n.name {
-                    for (p1, p2) in a.params.iter().zip(n.params.iter()) {
-                        if p1 != p2 {
-                            continue 'outer;
-                        }
-                    }
-                    return Ok(ConflictCheckResult::NonConflict);
-                }
-            }
+        if 0 < a.intersection(&b.neg).count() {
+            Ok(ConflictCheckResult::NonConflict)
+        } else {
+            Ok(ConflictCheckResult::Conflict)
         }
-        Ok(ConflictCheckResult::Conflict)
     }
 
     pub fn get_concrete_impl(&mut self, im: &Impl) -> Result<ConcreteImpl> {
@@ -400,12 +392,12 @@ impl<'a> ConflictCheckEnv<'a> {
                     .pos
                     .iter()
                     .map(|t| self.texp_to_concrete_trait(&env, t))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Result<HashSet<_>, _>>()?;
                 let neg = bound
                     .neg
                     .iter()
                     .map(|t| self.texp_to_concrete_trait(&env, t))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Result<HashSet<_>, _>>()?;
                 let b = ConcreteBound { pos, neg };
                 self.params.push(Some(b));
             } else {
@@ -441,8 +433,8 @@ impl<'a> ConflictCheckEnv<'a> {
                 let params = unif.get_all_unified_params();
                 for (ct, ps) in params {
                     let mut bound = ConcreteBound {
-                        pos: Vec::new(),
-                        neg: Vec::new(),
+                        pos: HashSet::new(),
+                        neg: HashSet::new(),
                     };
                     for p in ps.iter() {
                         let b = &env.params[*p];
