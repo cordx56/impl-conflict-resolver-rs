@@ -1,7 +1,6 @@
 use super::*;
 use anyhow::{anyhow, Context as _, Result};
 use std::collections::{HashMap, HashSet};
-use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConflictCheckResult {
