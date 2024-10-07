@@ -195,26 +195,21 @@ pub fn trait_bound(s: &str) -> IResult<&str, Bound> {
 pub fn extend_trait_bound(s: &str) -> IResult<&str, Bound> {
     map(
         tuple((
-            opt(tag("!")),
             t_exp,
             many0(map(
-                tuple((multispace0, tag("+"), multispace0, opt(tag("!")), t_exp)),
-                |(_, _, _, opr, t_exp)| (opr, t_exp),
+                tuple((multispace0, alt((tag("+"), tag("-"))), multispace0, t_exp)),
+                |(_, opr, _, t_exp)| (opr, t_exp),
             )),
         )),
-        |(first_neg, head, tail)| {
-            let mut pos = Vec::new();
+        |(first, tail)| {
+            let mut pos = vec![first];
             let mut neg = Vec::new();
-            if first_neg.is_none() {
-                pos.push(head);
-            } else {
-                neg.push(head);
-            }
+
             for (opr, t_exp) in tail {
-                if opr.is_none() {
-                    pos.push(t_exp);
-                } else {
+                if opr == "-" {
                     neg.push(t_exp);
+                } else {
+                    pos.push(t_exp);
                 }
             }
             Bound { pos, neg }

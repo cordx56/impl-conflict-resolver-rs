@@ -70,7 +70,7 @@ impl Display for Bound {
             }
         }
         for t in self.neg.iter() {
-            write!(f, " + !{}", t)?;
+            write!(f, " - {}", t)?;
         }
         Ok(())
     }
