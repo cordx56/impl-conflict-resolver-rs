@@ -8,6 +8,6 @@ fn main() {
     // println!("program: {:?}", program);
     let results = check::checker::Checker::new().check(program).unwrap();
     for result in results {
-        println!("{:?}:\n\t{}\n\t{}", result.0, result.1, result.2);
+        println!("{:?}:\n  {}\n  {}", result.0, result.1, result.2);
     }
 }
